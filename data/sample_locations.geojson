@@ -1,0 +1,9 @@
+{
+"type": "FeatureCollection",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "stop_id": 1321.0, "stop_code": 7427.0, "stop_name": "659 Remuera Rd", "stop_lat": -36.879865, "stop_lon": 174.81715 }, "geometry": { "type": "Point", "coordinates": [ 174.81714999981941, -36.879864999597316 ] } },
+{ "type": "Feature", "properties": { "stop_id": 5107.0, "stop_code": 7083.0, "stop_name": "Mayoral Drive Opposite Aotea Centre", "stop_lat": -36.851833, "stop_lon": 174.76099 }, "geometry": { "type": "Point", "coordinates": [ 174.76098999963401, -36.851833000384183 ] } },
+{ "type": "Feature", "properties": { "stop_id": 1843.0, "stop_code": 8314.0, "stop_name": "464 Sandringham Rd", "stop_lat": -36.888577, "stop_lon": 174.73741 }, "geometry": { "type": "Point", "coordinates": [ 174.73740999970278, -36.888576999657182 ] } }
+]
+}
