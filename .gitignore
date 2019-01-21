@@ -48,4 +48,6 @@ Temporary Items
 
 # Directories that contain otp server files
 otp_server
+otp_matrix_auckland_2016
+otp_server_auckland_2018
 source peter

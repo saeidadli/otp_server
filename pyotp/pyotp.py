@@ -4,19 +4,34 @@ Uses otp API to preform network analysis.
 
 import json
 import time
+import zipfile
+import io
+
 from datetime import datetime
 
 import requests
+import tempfile
 
 import pandas as pd
 import geopandas as gpd
 import shapely.geometry as geom
 
+from pathlib import Path
+
 #=====================general functions==========================
 #decode an encoded string
 def decode(encoded):
     """
-    An algorithms to decode the string to create a list of latitude,longitude coordinates.
+    Returns a Decoded list of latitude,longitude coordinates.
+    Parameters
+    ----------
+    encoded : Endcoded string
+
+    Returns
+    -------
+    list
+        Has the structure
+        [(lon1, lat1), (lon2, lat2), ..., (lonn, latn)]
     """
     #six degrees of precision in valhalla
     inv = 1.0 / 1e6;
@@ -53,6 +68,47 @@ def route(
     trip_name = '',
     date_time = datetime.now(),
     control_vars = dict()): # a dictionary of control variables
+    """
+    Return a GeoDataFrame with detailed trip information for the best option.
+    Parameters
+    ----------
+    locations_gdf : GeoDataFrame
+        It should only contain two records, first record is origina and
+        the second record is destination. If more than two records only
+        the first two records are considered.
+    mode : string
+        Modes that can be used include CAR, BUS, FERRY, RAIL, TRANSIT, 
+        WALK, BICYCLE, MULTIMODAL
+    trip_name : string
+        gives the trip a name which is stored in the trip_name in output
+        GeoDataFrame.
+    date_time : datetime object
+        Sets the start time of a trip. Only important if the mode is 
+        transit or a subset of transit. 
+    control_vars : dictionanry
+        If you want to add more control variables to the route add them as
+        dictionary. An examples is {"maxWalkDistance":"1000", "arriveBy":"false",
+        "wheelchair":"false", "locale":"en"}
+    Returns
+    -------
+    GeoDataFrame
+        Has the structure
+        trip_name -> the name given as an input to the trip.
+        leg_id -> A counter for each trip leg
+        mode -> returns the mode for each trip leg
+        from -> the shaply point data in WSG84 for the origin location
+        from_name -> the interim stop id on the network or 'Origin'
+        to -> the shaply point data in WSG84 for the destination location
+        to_name -> the interim stop id on the network or 'Destination'
+        route_id -> the route id for the trip leg if the mode is transit
+        trip_id -> the trip id for the trip leg if the mode is transit
+        distance -> Distance traveled in meters for the trip leg
+        duration -> Travel time for the trip leg in seconds
+        startTime -> time stamp for the start time of the trip leg
+        endTime -> time stamp for the end time of the trip leg
+        waitTime -> Wait time for the trip leg in seconds
+        geometry -> The goemetry of the trip leg in shaply object and WGS84
+    """
     
     #convert the geometry into a list of dictinoaries
     if not locations_gdf.crs:
@@ -175,7 +231,7 @@ def route(
         'waitTime',
         'geometry']
     legs_df = legs_df[field_order]
-    legs_gdf = gpd.GeoDataFrame(legs_df)
+    legs_gdf = gpd.GeoDataFrame(legs_df, crs = {'init': 'epsg:4326'})
     
 
     return legs_gdf
@@ -184,9 +240,37 @@ def service_area(
     in_gdf, 
     id_field = '',
     mode = "TRANSIT,WALK", 
-    breaks = [500, 1000], #in seconds
+    breaks = [10, 20], #in minutes
     date_time = datetime.now(),
     control_vars = dict()): # a dictionary of control variables
+    
+    """
+    Return a GeoDataFrame of catchments for each point in 'in_gdf'.
+    Parameters
+    ----------
+    in_gdf : GeoDataFrame
+        Contains a series of points and optionally a name for each point
+        as the origins of the catchment analysis.
+    id_field : string
+        id_field is the name of the field in 'in_gdf' that contains
+        the ids for each origin. Each point has to have a unique id.
+    mode : string
+        Similar to the ``route`` function.
+    breaks : list
+        A list of time breaks in minutes. A catchment for each time break
+        will be created for each origin.
+    date_time : datetime object
+        Similar to the ``route`` function. 
+    control_vars : dictionanry
+        Similar to the ``route`` function.
+    Returns
+    -------
+    GeoDataFrame
+        Has the structure
+        time -> time break for the isochrone in seconds.
+        geometry -> Shaply polygon geometry
+        name -> name of the origin from the input 'id_field'.
+    """
     
     #convert the geometry into a list of dictinoaries
     if not in_gdf.crs:
@@ -217,36 +301,76 @@ def service_area(
                 "date":d,
                 "time":t,
                 "mode":mode,
-                "cutoffSec":breaks}
+                "cutoffSec":[x*60 for x in breaks]}
             
             query = {**query, **control_vars}
 
             r = requests.get(url, params=query)
-
-            iso_gdf = gpd.GeoDataFrame.from_features(r.json()['features'])
+            print(r.headers)
+            
+            if 'zip' in r.headers['Content-Type']:
+                z = zipfile.ZipFile(io.BytesIO(r.content))
+                tmp_dir = tempfile.TemporaryDirectory()
+                z.extractall(tmp_dir.name)
+                shapefiles = list()
+                for f in Path(tmp_dir.name).glob("*.shp"):
+                    shapefiles.append(f)
+                iso_gdf = gpd.read_file(str(shapefiles[0]))
+                tmp_dir.cleanup()
+            else:
+                iso_gdf = gpd.GeoDataFrame.from_features(r.json()['features'])
+                
             if id_field:
                 iso_gdf['name'] = row[1][id_field]
             
             iso_list.append(iso_gdf)
-        except:
-            pass
+        except Exception as e: print(e)
     if iso_list:
         out_gdf = pd.concat(iso_list)   
         out_gdf = out_gdf[out_gdf['geometry'].notnull()].copy()
-        out_gdf = gpd.GeoDataFrame(out_gdf).copy()
+        out_gdf = gpd.GeoDataFrame(out_gdf, crs = {'init': 'epsg:4326'}).copy()
     else:
-        out_gdf = gpd.GeoDataFrame()
-    return out_gdf
+        out_gdf = gpd.GeoDataFrame(crs = {'init': 'epsg:4326'})
+    
+    return out_gdf.reset_index(drop = True)
 
-def od_matrix_unlimited(
+def od_matrix(
     origins,
     destinations,
     mode,
-    origins_name = '',
-    destinations_name = '',
+    origins_name,
+    destinations_name,
+    max_travel_time = 60,
     date_time = datetime.now(),
     control_vars = dict()): # a dictionary of control variables
-    
+    """
+    Return a GeoDataFrame with detailed trip information for the best option.
+    Parameters
+    ----------
+    origins : GeoDataFrame
+        It should only contain a series of points.
+    destinations : GeoDataFrame
+        It should only contain a series of points.
+    mode : string
+        Similar to the ``route`` function.
+    origins_name : string
+        gives the origin a name which is stored in the ``trip_name`` in output
+        GeoDataFrame.
+    max_travel_time : integer
+        maximum travel time from each origin in minutes. Use ``None`` to disable
+        it.
+    date_time : datetime object
+        Similar to the ``route`` function. 
+    control_vars : dictionanry
+        Similar to the ``route`` function.
+    Returns
+    -------
+    GeoDataFrame
+        Has the structure
+        trip_name -> contains ``origins_name`` for each origin.
+        The rest are similar to the ``route`` function. 
+    """    
+       
     if not origins.crs or not destinations.crs:
         print('please define projection for the input gdfs')
         sys.exit()
@@ -261,8 +385,30 @@ def od_matrix_unlimited(
     t1 = datetime.now()
     print('Analysis started at: {0}'.format(t1))
     
+    if max_travel_time:
+        iso  = service_area(
+            origins, 
+            id_field = origins_name,
+            mode = mode, 
+            breaks = [max_travel_time], #in seconds
+            date_time = date_time,
+            control_vars = control_vars,
+        )
+    
+    poly_destinations = destinations.copy()
+    poly_destinations['geometry']= poly_destinations.buffer(0.00001)
+    
     for o in origins[['geometry', origins_name]].itertuples():
-        for d in destinations[['geometry', destinations_name]].itertuples():
+        o_name = o[2]
+        selected_iso = iso[iso['name']==o_name].copy()
+        selected_iso = gpd.GeoDataFrame(selected_iso)
+        
+        res_intersection = gpd.overlay(poly_destinations, selected_iso, how='intersection')
+        
+        selected_destinations = destinations[destinations[destinations_name].isin(res_intersection[destinations_name])].copy()
+
+        #selected_destinations
+        for d in selected_destinations[['geometry', destinations_name]].itertuples():
             od = pd.DataFrame(
                 [[o[1], o[2]],
                  [d[1], d[2]]],
@@ -270,20 +416,23 @@ def od_matrix_unlimited(
             od = gpd.GeoDataFrame(od, crs = {'init': 'epsg:4326'})
             r = route(
                 locations_gdf = od, #a pair of locations in geodataframe fromat
-                mode='TRANSIT,WALK',
+                mode = mode,
                 trip_name = 'from {0} to {1}'.format(o[2], d[2]),
                 date_time = date_time,
                 control_vars = control_vars)
             od_list.append(r)
-            cnt += 1
-            if divmod(cnt, 50)[1] == 0:
-                t2 = datetime.now()
-                print('Total routes caclulated: {0}, time: {1}'.format(cnt, t2-t1))
+            
+        cnt += 1
+        t_delta = datetime.now() - t1
+        eta = t_delta * origins.shape[0] / cnt
+        print("remaining origins {0}, estimated remaining time: {1}".format(origins.shape[0] - cnt, eta - t_delta))
+
     od_df = pd.concat(od_list).reset_index(drop = True)
     od_gdf = gpd.GeoDataFrame(od_df, crs = {'init': 'epsg:4326'})
+    print("Elapsed time was {0} seconds".format(datetime.now() - t1))
     
     return od_gdf
-    
+
     
     
     
