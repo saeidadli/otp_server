@@ -425,7 +425,7 @@ def od_matrix(
         cnt += 1
         t_delta = datetime.now() - t1
         eta = t_delta * origins.shape[0] / cnt
-        print("remaining origins {0}, estimated remaining time: {1}".format(origins.shape[0] - cnt, eta - t_delta))
+        print("calculating {0} ODs, remaining origins {1}, estimated remaining time: {2}".format(selected_destinations.shape[0], origins.shape[0] - cnt, eta - t_delta))
 
     od_df = pd.concat(od_list).reset_index(drop = True)
     od_gdf = gpd.GeoDataFrame(od_df, crs = {'init': 'epsg:4326'})
