@@ -1,0 +1,5 @@
+geopandas==0.4.10
+numpy==1.13.3
+pandas==0.23.4
+requests==2.20.1
+shapely==1.6.4
