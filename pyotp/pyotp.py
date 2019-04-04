@@ -147,6 +147,9 @@ def route(
 
     r = requests.get(url, params=query)
     
+    #check for request error
+    r.raise_for_status()
+
     #if error then return emptly GeoDataFrame
     if 'error' in r.json():
         return gpd.GeoDataFrame()
