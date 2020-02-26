@@ -74,5 +74,7 @@ An example for each of these functions can be found in ```ipynb/examples.ipynb``
 * There are no tests written yet.
 * I welcome contributions from anyone and everyone.
 
+---
+
 ## Authors
 * Saeid Adli, 2019/01/24
